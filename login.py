@@ -14,6 +14,8 @@ import imghdr
 import sys
 import platform
 import multiprocessing
+import sqlite3
+import datetime
 import ConfigParser
 
 
@@ -145,8 +147,32 @@ thread_number = 30')
 
 class ScrapImg:
     def __init__(self):
+        self.db_path = 'record.db'
         pass
 
+    def data_base_init(self):
+        if not os.path.exists(self.db_path):
+            self.con = sqlite3.connect(self.db_path)
+            self.con.execute('CREATE TABLE url_record(\
+              url CHAR PRIMARY KEY ,\
+              count INT DEFAULT 0,\
+              desciption CHAR ,\
+              is_done INT DEFAULT 0,\
+              record_time DATE )')
+            self.con.commit()
+
+    def add_record(self, url, count, description, is_done):
+        now = datetime.datetime.now()
+        try:
+            self.con.execute('INSERT INTO url_record VALUES (?,?,?,?,?)', (url, count, description, 1, now))
+            self.con.commit()
+        except:
+            e = sys.exc_info()[0]
+            print e
+        pass
+
+    def generate_url(self):
+        pass
 
 if __name__ == '__main__':
     hk_login = LoginMethod()
