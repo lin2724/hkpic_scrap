@@ -47,7 +47,8 @@ login_password =\n\
 link_file = board_link.txt\n\
 [scrapy_settings]\n\
 #how many threads do u want when scrap pic\n\
-thread_number = 30')
+thread_number = 30\n\
+img_folder = img')
 
         if not os.path.exists(self.cookie_file_path) or self.set_get_cookie:
             with open(self.cookie_file_path, 'w+') as fd:
@@ -60,7 +61,7 @@ thread_number = 30')
             url=self.status_url,
             headers=http_headers
         )
-        data = urllib2.urlopen(req_test).read()
+        data = urllib2.urlopen(req_test, timeout=10).read()
         with open('hk_check_login_result.html', 'w+') as fd:
             fd.write(data)
             print ('get satus end')
@@ -93,9 +94,9 @@ thread_number = 30')
     def do_login(self):
         login_data = dict()
         login_data['fastloginfield'] = 'username'
-        login_data['username'] = r'lin2724'
+        login_data['username'] = self.username
         login_data['cookietime'] = '2592000'
-        login_data['password'] = 'lin13721458201'
+        login_data['password'] = self.password
         login_data['quickfoward'] = 'yes'
         login_data['handlekey'] = 'ls'
 
@@ -148,7 +149,14 @@ thread_number = 30')
 class ScrapImg:
     def __init__(self):
         self.db_path = 'record.db'
+        self.img_store_path = 'img'
+        self.do_init()
         pass
+
+    def do_init(self):
+        self.data_base_init()
+        if not os.path.exists(self.img_store_path):
+            os.mkdir(self.img_store_path)
 
     def data_base_init(self):
         if not os.path.exists(self.db_path):
@@ -169,13 +177,92 @@ class ScrapImg:
         except:
             e = sys.exc_info()[0]
             print e
+            debug_info(e)
         pass
 
-    def generate_url(self):
+    def filter_page_urls(self, data):
+        with open('page.html') as fd:
+            data = fd.read()
+            #prog = re.compile('a href="thread-\d{4,9}-1-1.html" .*?title=".*?" class="z"')
+            m = re.findall('a href="(?P<half_url>thread-\d{4,9})-1-1.html" .*?title="(?P<title>.*?)" class="z"', data)
+            #m = prog.findall(data)
+            #print data
+        for url in m:
+            (half_url, title) = url
+            print half_url + title
+        print 'total:' + str(len(m))
         pass
+
+    def generate_page_url(self):
+        http_headers = {'User-Agent': 'Mozilla/5.0 (X11; Linux i686; rv:8.0) Gecko/20100101 Firefox/8.0',
+                        }
+        req_login = urllib2.Request(
+            url='http://hkpic-forum.xyz/forum-18-1.html',
+            headers=http_headers
+        )
+        data = urllib2.urlopen(req_login, timeout=10).read()
+        with open('page.html', 'w+') as fd:
+            fd.write(data)
+        self.filter_page_urls(data)
+        pass
+
+    def get_img_tail(self, url):
+        m = re.search('.\w{3,4}$', url)
+        return m.group(0)
+        pass
+
+    def download_img(self, urls):
+        title = time.strftime('%Y_%m_%d_%H_%M_%S_')
+        http_headers = {'User-Agent': 'Mozilla/5.0 (X11; Linux i686; rv:8.0) Gecko/20100101 Firefox/8.0',
+                        }
+        count = 0
+        print type(urls)
+        if type(urls) != 'list':
+            tmp = urls[:]
+            urls = list()
+            urls.append(tmp)
+        print type(urls)
+        for url in urls:
+            print 'url: %s' % url
+            req_login = urllib2.Request(
+                url=url,
+                headers=http_headers
+            )
+            try:
+                data = urllib2.urlopen(req_login).read()
+                img_name = title + str(count) + self.get_img_tail(url)
+                file_path = os.path.join(self.img_store_path, img_name)
+                print 'filename: %s' % img_name
+                with open(file_path, 'wb+') as fd:
+                    fd.write(data)
+                count += 1
+            except urllib2.HTTPError:
+                e = sys.exc_info()[0]
+                print e
+                debug_info(e)
+        pass
+
+
+def debug_info(information):
+    debug_file = 'debug.log'
+    if not os.path.exists('debug.log'):
+        with open(debug_file, 'w+') as fd:
+            pass
+    with open(debug_file, 'a') as fd:
+        if callable(information):
+            fd.write(str(information) + time.strftime('     %H:%M:%S %d %b') + '\n')
+        else:
+            fd.write(information + time.strftime('     %H:%M:%S %d %b') + '\n')
+    pass
+
 
 if __name__ == '__main__':
     hk_login = LoginMethod()
-    hk_login.get_config()
-    hk_login.do_login()
-    print hk_login
+    #hk_login.get_config()
+    #hk_login.do_login()
+
+    scrap = ScrapImg()
+    scrap.filter_page_urls('xx')
+    #scrap.generate_page_url()
+    #scrap.download_img('http://img.bipics.net/data/attachment/block/aa/aab8bb730c4e2c4dc489128235424dc9.jpg')
+    #print hk_login
