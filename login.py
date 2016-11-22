@@ -145,6 +145,16 @@ img_folder = img')
                 self.set_get_cookie = True
                 self.do_login()
 
+    def get_url_data(self, url):
+        http_headers = {'User-Agent': 'Mozilla/5.0 (X11; Linux i686; rv:8.0) Gecko/20100101 Firefox/8.0',
+                        }
+        req_test = urllib2.Request(
+            url=url,
+            headers=http_headers
+        )
+        data = urllib2.urlopen(req_test, timeout=10).read()
+        return data
+
 
 class ScrapImg:
     def __init__(self):
@@ -181,30 +191,53 @@ class ScrapImg:
         pass
 
     def filter_page_urls(self, data):
-        with open('page.html') as fd:
-            data = fd.read()
+        #for page in range(1000):
+        #    page_url = 'http://hkpic-forum.xyz/forum-18-%d' % page + '.html'
+        #with open('page.html') as fd:
+        #    data = fd.read()
             #prog = re.compile('a href="thread-\d{4,9}-1-1.html" .*?title=".*?" class="z"')
-            m = re.findall('a href="(?P<half_url>thread-\d{4,9})-1-1.html" .*?title="(?P<title>.*?)" class="z"', data)
+        m = re.findall('a href="thread-(?P<main_id>\d{4,9})(?P<sub_url>-\d{1,6}-\d{1,6}.html)" .*?title="(?P<title>.*?)" class="z"', data)
             #m = prog.findall(data)
             #print data
         for url in m:
-            (half_url, title) = url
-            print half_url + title
+            (main_id, sub_url, title) = url
+            print 'thread-' + main_id + sub_url + title
         print 'total:' + str(len(m))
         pass
 
     def generate_page_url(self):
         http_headers = {'User-Agent': 'Mozilla/5.0 (X11; Linux i686; rv:8.0) Gecko/20100101 Firefox/8.0',
+                        'Referer':'http://hkpic-forum.xyz/forum.php?gid=1',
                         }
-        req_login = urllib2.Request(
-            url='http://hkpic-forum.xyz/forum-18-1.html',
-            headers=http_headers
-        )
-        data = urllib2.urlopen(req_login, timeout=10).read()
+        min_page = 4271873
+        for page in range(1, 3):
+            page_url = 'http://hkpic-forum.xyz/forum-18-%d' % page + '.html'
+            print page_url
+            req_login = urllib2.Request(
+                url=page_url,
+                headers=http_headers
+            )
+            data = urllib2.urlopen(req_login, timeout=10).read()
+            self.filter_page_urls(data)
         with open('page.html', 'w+') as fd:
             fd.write(data)
-        self.filter_page_urls(data)
+
         pass
+
+    def get_img_url(self, data):
+        # http://img.bipics.net/data/attachment/forum/201610/14/101421bvx3f83jvq4xyyo3.jpg"
+        img_names = re.findall('http://img.bipics.net/data/attachment/forum/(?P<time>\d{4,6}/\d{1,2}/)(?P<img_name>.*?)"', data)
+        count = 0
+        ret = list()
+        for img_name in img_names:
+            (folde, name) = img_name
+            if 'thumb' not in name:
+                ret.append('http://img.bipics.net/data/attachment/forum/' + folde + name)
+                count += 1
+        print 'total count : %d' % count
+        return ret
+        pass
+
 
     def get_img_tail(self, url):
         m = re.search('.\w{3,4}$', url)
@@ -258,11 +291,18 @@ def debug_info(information):
 
 if __name__ == '__main__':
     hk_login = LoginMethod()
-    #hk_login.get_config()
-    #hk_login.do_login()
+    hk_login.get_config()
+    hk_login.do_login()
 
     scrap = ScrapImg()
-    scrap.filter_page_urls('xx')
-    #scrap.generate_page_url()
+
+    #data = hk_login.get_url_data('http://hkpic-forum.xyz/thread-4244506-1-1.html')
+    #with open('page.html', 'r') as fd:
+    #    data = fd.read()
+    #scrap.get_img_url(data)
+    #with open('page.html', 'w+') as fd:
+    #    fd.write(data)
+    #scrap.filter_page_urls('xx')
+    scrap.generate_page_url()
     #scrap.download_img('http://img.bipics.net/data/attachment/block/aa/aab8bb730c4e2c4dc489128235424dc9.jpg')
     #print hk_login
