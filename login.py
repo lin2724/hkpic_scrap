@@ -171,18 +171,40 @@ class ScrapImg:
     def data_base_init(self):
         if not os.path.exists(self.db_path):
             self.con = sqlite3.connect(self.db_path)
-            self.con.execute('CREATE TABLE url_record(\
-              url CHAR PRIMARY KEY ,\
+            self.con.execute('CREATE TABLE page_record(\
+              page_id INT PRIMARY KEY ,\
+              url char,\
               count INT DEFAULT 0,\
               desciption CHAR ,\
               is_done INT DEFAULT 0,\
               record_time DATE )')
             self.con.commit()
+            self.con.execute('CREATE TABLE img_record(\
+              img_url CHAR PRIMARY KEY ,\
+              page_id INT,\
+              desciption CHAR ,\
+              is_done INT DEFAULT 0,\
+              record_time DATE ,\
+              foreign key (page_id) references page_record(page_id) on delete cascade on update cascade)')
+            self.con.commit()
+        else:
+            self.con = sqlite3.connect(self.db_path)
 
-    def add_record(self, url, count, description, is_done):
+    def add_page_record(self, page_id,url, description):
         now = datetime.datetime.now()
         try:
-            self.con.execute('INSERT INTO url_record VALUES (?,?,?,?,?)', (url, count, description, 1, now))
+            self.con.execute('INSERT INTO page_record VALUES (?,?,?,?,?,?)', (page_id, url, 0, description.decode('utf-8'), 0, now))
+            self.con.commit()
+        except:
+            e = sys.exc_info()[0]
+            print e
+            debug_info(e)
+        pass
+
+    def add_img_record(self, page_id, img_url, description):
+        now = datetime.datetime.now()
+        try:
+            self.con.execute('INSERT INTO img_record VALUES (?,?,?,?,?)', (img_url,page_id, description.decode('utf-8'), 0, now))
             self.con.commit()
         except:
             e = sys.exc_info()[0]
@@ -199,10 +221,17 @@ class ScrapImg:
         m = re.findall('a href="thread-(?P<main_id>\d{4,9})(?P<sub_url>-\d{1,6}-\d{1,6}.html)" .*?title="(?P<title>.*?)" class="z"', data)
             #m = prog.findall(data)
             #print data
+        ret_list = list()
         for url in m:
             (main_id, sub_url, title) = url
             print 'thread-' + main_id + sub_url + title
+            tmp_dict = dict()
+            tmp_dict['page_id'] = int(main_id)
+            tmp_dict['url'] = 'http://hkpic-forum.xyz/thread-'+ main_id + sub_url
+            tmp_dict['title'] = title
+            ret_list.append(tmp_dict)
         print 'total:' + str(len(m))
+        return ret_list
         pass
 
     def generate_page_url(self):
@@ -210,18 +239,39 @@ class ScrapImg:
                         'Referer':'http://hkpic-forum.xyz/forum.php?gid=1',
                         }
         min_page = 4271873
-        for page in range(1, 3):
+        try_count = 0
+        err_flag = 0
+        for page in range(1, 1000):
             page_url = 'http://hkpic-forum.xyz/forum-18-%d' % page + '.html'
             print page_url
             req_login = urllib2.Request(
                 url=page_url,
                 headers=http_headers
             )
-            data = urllib2.urlopen(req_login, timeout=10).read()
-            self.filter_page_urls(data)
-        with open('page.html', 'w+') as fd:
-            fd.write(data)
+            while True:
+                try:
+                    data = urllib2.urlopen(req_login, timeout=10).read()
+                    err_flag = 0
+                except:
+                    err_flag = 1
+                if err_flag:
+                    if try_count > 10:
+                        try_count = 0
+                        print 'url parse fail, try again %d:%s' %(try_count, page_url)
+                        break
+                    else:
+                        try_count += 1
+                else:
+                    break
 
+            page_list =  self.filter_page_urls(data)
+            for page in page_list:
+                print 'store page %s' % str(page)
+                self.add_page_record(page['page_id'], page['url'], page['title'])
+            #e = sys.exc_info()[0]
+            #print e
+        #with open('page.html', 'w+') as fd:
+        #    fd.write(data)
         pass
 
     def get_img_url(self, data):
@@ -237,7 +287,6 @@ class ScrapImg:
         print 'total count : %d' % count
         return ret
         pass
-
 
     def get_img_tail(self, url):
         m = re.search('.\w{3,4}$', url)
@@ -295,7 +344,8 @@ if __name__ == '__main__':
     hk_login.do_login()
 
     scrap = ScrapImg()
-
+    #scrap.add_page_record(1,'url', '你好'.decode('utf-8'))
+    #scrap.add_img_record(1,'url', 'http://', '你好')
     #data = hk_login.get_url_data('http://hkpic-forum.xyz/thread-4244506-1-1.html')
     #with open('page.html', 'r') as fd:
     #    data = fd.read()
