@@ -197,18 +197,62 @@ class ScrapImg:
             self.con.commit()
         except:
             e = sys.exc_info()[0]
-            print e
+            print 'add_check_record except:' + str(e)
             debug_info(e)
         pass
 
-    def add_img_record(self, page_id, img_url, description):
+    def add_img_record(self, img_url, page_id, description):
         now = datetime.datetime.now()
         try:
-            self.con.execute('INSERT INTO img_record VALUES (?,?,?,?,?)', (img_url,page_id, description.decode('utf-8'), 0, now))
+            self.con.execute('INSERT INTO img_record VALUES (?,?,?,?,?,?)', (img_url, page_id, 0, description.decode('utf-8'), 0, now))
             self.con.commit()
         except:
             e = sys.exc_info()[0]
-            print e
+            print 'add_img_record except:' + str(e)
+            debug_info(e)
+        pass
+
+    def check_page_record(self,page_id):
+        try:
+            self.con.execute('update page_record set is_done=1\
+            where page_id=(?)', ( page_id, ))
+            self.con.commit()
+        except:
+            e = sys.exc_info()[0]
+            print 'check_page_record except:' + str(e)
+            debug_info('check_page_record except:' + str(e))
+        pass
+
+    def check_img_record(self, page_url):
+        try:
+            self.con.execute('update img_record set is_done=1\
+            where img_url=(?)', ( page_url, ))
+            self.con.commit()
+        except:
+            e = sys.exc_info()[0]
+            print 'add_img_record except:' + str(e)
+            debug_info('check_img_record except:' + str(e))
+        pass
+
+    def get_page_record(self, page_id,url, description):
+        now = datetime.datetime.now()
+        try:
+            self.con.execute('INSERT INTO page_record VALUES (?,?,?,?,?,?)', (page_id, url, 0, description.decode('utf-8'), 0, now))
+            self.con.commit()
+        except:
+            e = sys.exc_info()[0]
+            print 'add_check_record except:' + str(e)
+            debug_info(e)
+        pass
+
+    def get_img_record(self, page_id,url, description):
+        now = datetime.datetime.now()
+        try:
+            self.con.execute('INSERT INTO page_record VALUES (?,?,?,?,?,?)', (page_id, url, 0, description.decode('utf-8'), 0, now))
+            self.con.commit()
+        except:
+            e = sys.exc_info()[0]
+            print 'add_check_record except:' + str(e)
             debug_info(e)
         pass
 
@@ -257,9 +301,11 @@ class ScrapImg:
                 if err_flag:
                     if try_count > 10:
                         try_count = 0
-                        print 'url parse fail, try again %d:%s' %(try_count, page_url)
+                        print 'page parse fail : %s' % page_url
+                        debug_info('page parse fail url:' + page_url)
                         break
                     else:
+                        print 'url parse timeout, try again %d:%s' %(try_count, page_url)
                         try_count += 1
                 else:
                     break
