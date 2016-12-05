@@ -17,6 +17,8 @@ import multiprocessing
 import sqlite3
 import datetime
 import ConfigParser
+import multiprocessing
+from multiprocessing import Process, Pipe
 
 
 class LoginMethod:
@@ -234,21 +236,22 @@ class ScrapImg:
             debug_info('check_img_record except:' + str(e))
         pass
 
-    def get_page_record(self, page_id,url, description):
+    def get_page_record(self, page_id):
         now = datetime.datetime.now()
         try:
-            self.con.execute('INSERT INTO page_record VALUES (?,?,?,?,?,?)', (page_id, url, 0, description.decode('utf-8'), 0, now))
+            self.con.execute('select * from page_record where page_record.page_id=(?)',(page_id, ))
             self.con.commit()
+            
         except:
             e = sys.exc_info()[0]
             print 'add_check_record except:' + str(e)
             debug_info(e)
         pass
 
-    def get_img_record(self, page_id,url, description):
+    def get_imgurl_of_page_record(self, page_id):
         now = datetime.datetime.now()
         try:
-            self.con.execute('INSERT INTO page_record VALUES (?,?,?,?,?,?)', (page_id, url, 0, description.decode('utf-8'), 0, now))
+            self.con.execute('select * from img_record where img_record.page_id=(?)', (page_id,))
             self.con.commit()
         except:
             e = sys.exc_info()[0]
@@ -272,7 +275,7 @@ class ScrapImg:
             tmp_dict = dict()
             tmp_dict['page_id'] = int(main_id)
             tmp_dict['url'] = 'http://hkpic-forum.xyz/thread-'+ main_id + sub_url
-            tmp_dict['title'] = title
+            tmp_dict['description'] = title
             ret_list.append(tmp_dict)
         print 'total:' + str(len(m))
         return ret_list
@@ -320,7 +323,99 @@ class ScrapImg:
         #    fd.write(data)
         pass
 
-    def get_img_url(self, data):
+    def parse_single_page_pipe(self, index, con):
+        http_headers = {'User-Agent': 'Mozilla/5.0 (X11; Linux i686; rv:8.0) Gecko/20100101 Firefox/8.0',
+                        'Referer': 'http://hkpic-forum.xyz/forum.php?gid=1',
+                        }
+        min_page = 4271873
+        try_count = 0
+        err_flag = 0
+        page_url = 'http://hkpic-forum.xyz/forum-18-%d' % index + '.html'
+        print page_url
+        req_login = urllib2.Request(
+            url=page_url,
+            headers=http_headers
+        )
+        while True:
+            try:
+                data = urllib2.urlopen(req_login, timeout=10).read()
+                err_flag = 0
+            except:
+                err_flag = 1
+            if err_flag:
+                if try_count > 10:
+                    try_count = 0
+                    print 'page parse fail : %s' % page_url
+                    debug_info('page parse fail url:' + page_url)
+                    break
+                else:
+                    print 'url parse timeout, try again %d:%s' % (try_count, page_url)
+                    try_count += 1
+            else:
+                break
+        page_list = self.filter_page_urls(data)
+        con.send(page_list)
+        pass
+
+    def parse_single_page_data(self, page_url):
+        http_headers = {'User-Agent': 'Mozilla/5.0 (X11; Linux i686; rv:8.0) Gecko/20100101 Firefox/8.0',
+                        'Referer': 'http://hkpic-forum.xyz/forum.php?gid=1',
+                        }
+        try_count = 0
+        print page_url
+        req_login = urllib2.Request(
+            url=page_url,
+            headers=http_headers
+        )
+        while True:
+            try:
+                data = urllib2.urlopen(req_login, timeout=10).read()
+                err_flag = 0
+            except:
+                err_flag = 1
+            if err_flag:
+                if try_count > 10:
+                    try_count = 0
+                    print 'detail page parse fail : %s' % page_url
+                    debug_info('detail page parse fail url:' + page_url)
+                    return None
+                else:
+                    print 'url parse timeout, try again %d:%s' % (try_count, page_url)
+                    try_count += 1
+            else:
+                break
+        return data
+        pass
+
+    def parse_pages_imgurls_from_pageurl_pipe(self, con, record_con):
+        while True:
+            if con.poll(3):
+                page_record = con.recv()  # prints "[42, None, 'hello']"
+                if type(page_record) == str and page_record == 'quit':
+                    print "done"
+                    break
+                data = self.parse_single_page_data(page_record['url'])
+                if data:
+                    img_urls = self.get_imgurls_from_data(data)
+                for imgurl in img_urls:
+                    record_con.send(imgurl)
+            else:
+                print 'parse_pages_imgurls_from_pageurl_pipe need more task'
+                con.send('ask')
+
+    def parse_imgdata_from_imgurl_pipe(self, con):
+        while True:
+            if con.poll(3):
+                img_record = con.recv()  # prints "[42, None, 'hello']"
+                if type(img_record) == str and img_record == 'quit':
+                    print "done"
+                    break
+                self.download_img(img_record['url'])
+            else:
+                print 'parse_imgdata_from_imgurl_pipe need more task'
+                con.send('ask')
+
+    def get_imgurls_from_data(self, data):
         # http://img.bipics.net/data/attachment/forum/201610/14/101421bvx3f83jvq4xyyo3.jpg"
         img_names = re.findall('http://img.bipics.net/data/attachment/forum/(?P<time>\d{4,6}/\d{1,2}/)(?P<img_name>.*?)"', data)
         count = 0
@@ -370,6 +465,67 @@ class ScrapImg:
                 debug_info(e)
         pass
 
+    def ask_pages_to_process(self, con):
+        while True:
+            if con.poll(3):
+                tmp = con.recv()  # prints "[42, None, 'hello']"
+                if type(tmp) == str and tmp == 'quit':
+                    print "done"
+                    break
+                print tmp
+                time.sleep(1)
+            else:
+                print 'timeout'
+                con.send('ask')
+        pass
+
+    def ask_imgs_to_process(self, con):
+        while True:
+            if con.poll(3):
+                tmp = con.recv()  # prints "[42, None, 'hello']"
+                if type(tmp) == str and tmp == 'quit':
+                    print "done"
+                    break
+                print tmp
+                time.sleep(1)
+            else:
+                print 'timeout'
+                con.send('ask')
+        pass
+
+    def pipe_single_handle_imgurl_store(self, con):
+        while True:
+            img_record = con.recv()
+            self.add_img_record( img_record['img_url'], img_record['page_id'], img_record['description'])
+        pass
+
+    def pipe_single_handle_imgurl_store_check(self, con):
+        while True:
+            img_record = con.recv()
+            self.check_page_record(img_record['img_url'])
+        pass
+
+    def pipe_single_handle_pageurl_store(self, con):
+        while True:
+            page_record = con.recv()
+            self.check_page_record(page_record['page_id'])
+
+    def start_parse(self):
+        parent_conn, child_conn = Pipe()
+        p = multiprocessing.Process(target=self.ask_pages_to_process, args=(child_conn,) )
+        p.start()
+        p = multiprocessing.Process(target=self.ask_pages_to_process, args=(child_conn,) )
+        p.start()
+        for y in range(10):
+            for i in range(10):
+                parent_conn.send(i)
+            tmp = parent_conn.recv()
+            print 'give more'
+        parent_conn.send('quit')
+        parent_conn.send('quit')
+        parent_conn.close()
+        pass
+
 
 def debug_info(information):
     debug_file = 'debug.log'
@@ -385,9 +541,9 @@ def debug_info(information):
 
 
 if __name__ == '__main__':
-    hk_login = LoginMethod()
-    hk_login.get_config()
-    hk_login.do_login()
+    #hk_login = LoginMethod()
+    #hk_login.get_config()
+    #hk_login.do_login()
 
     scrap = ScrapImg()
     #scrap.add_page_record(1,'url', '你好'.decode('utf-8'))
@@ -399,6 +555,7 @@ if __name__ == '__main__':
     #with open('page.html', 'w+') as fd:
     #    fd.write(data)
     #scrap.filter_page_urls('xx')
-    scrap.generate_page_url()
+    #scrap.generate_page_url()
+    scrap.start_parse()
     #scrap.download_img('http://img.bipics.net/data/attachment/block/aa/aab8bb730c4e2c4dc489128235424dc9.jpg')
     #print hk_login
