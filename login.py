@@ -241,7 +241,7 @@ class ScrapImg:
         try:
             self.con.execute('select * from page_record where page_record.page_id=(?)',(page_id, ))
             self.con.commit()
-            
+
         except:
             e = sys.exc_info()[0]
             print 'add_check_record except:' + str(e)
