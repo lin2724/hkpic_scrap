@@ -18,13 +18,15 @@ import sqlite3
 import datetime
 import ConfigParser
 import multiprocessing
+import socket
 from multiprocessing import Process, Pipe
 
 
 class LoginMethod:
     def __init__(self, set_get_cookie = False):
-        self.login_url = 'http://hkpic-forum.xyz/member.php?mod=logging&action=login&loginsubmit=yes&infloat=yes&lssubmit=yes&inajax=1'
-        self.status_url = 'http://hkpic-forum.xyz/forum.php'
+        self.login_url = 'http://hkbbcc.net/member.php?mod=logging&action=login&loginsubmit=yes&infloat=yes&lssubmit=yes&inajax=1'
+        #http://hkpic-forum.xyz/member.php?mod=logging&action=login&loginsubmit=yes&infloat=yes&lssubmit=yes&inajax=1
+        self.status_url = 'http://hkbbcc.net/forum.php'#http://hkpic-forum.xyz/forum.php
         self.config_file_path = 'config.ini'
         self.cookie_file_path = 'cookie'
         self.username = ''
@@ -52,18 +54,29 @@ link_file = board_link.txt\n\
 thread_number = 30\n\
 img_folder = img')
 
-        if not os.path.exists(self.cookie_file_path) or self.set_get_cookie:
-            with open(self.cookie_file_path, 'w+') as fd:
-                pass
-
     def get_status(self):
-        http_headers = {'User-Agent': 'Mozilla/5.0 (X11; Linux i686; rv:8.0) Gecko/20100101 Firefox/8.0',
-                              }
+        return True
+        http_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64; rv:49.0) Gecko/20100101 Firefox/49.0',
+                        'Host':'hkbbcc.net',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                        'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
+                        'Accept-Encoding': 'gzip, deflate',
+                        'DNT': '1',
+                    }
         req_test = urllib2.Request(
             url=self.status_url,
             headers=http_headers
         )
-        data = urllib2.urlopen(req_test, timeout=10).read()
+        try_count = 0
+        while True:
+            try:
+                data = urllib2.urlopen(req_test, timeout=7).read()
+            except socket.timeout:
+                if try_count >= 3:
+                    print 'get login status timeout %d times' % try_count
+                    return False
+                print 'get login status timeout try again %d..' % try_count
+                try_count += 1
         with open('hk_check_login_result.html', 'w+') as fd:
             fd.write(data)
             print ('get satus end')
@@ -107,7 +120,7 @@ img_folder = img')
                              'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
                              'Accept-Encoding': 'gzip, deflate',
                              'DNT': '1',
-                             'Referer': 'http://hkpic-forum.xyz/forum.php',
+                             'Referer': self.status_url,
                              'Content-Type': 'application/x-www-form-urlencoded;text/html; charset=utf-8',
                              }
 
@@ -123,7 +136,19 @@ img_folder = img')
                 data=login_data,
                 headers=http_headers
             )
-            data = urllib2.urlopen(req_login).read()
+            try_count = 0
+            while True:
+                try:
+                    data = urllib2.urlopen(req_login, timeout=10).read()
+                except socket.timeout as e:
+                    print 'error occurred %s' % e
+                    if try_count>3:
+                        exec 1
+                    else:
+                        try_count += 1
+                        continue
+                break
+
             with open('hk_login_result.html', 'w+') as fd:
                 fd.write(data)
                 print ('login end')
@@ -162,6 +187,7 @@ class ScrapImg:
     def __init__(self):
         self.db_path = 'record.db'
         self.img_store_path = 'img'
+        self.max_thread = 20
         self.do_init()
         pass
 
@@ -171,6 +197,7 @@ class ScrapImg:
             os.mkdir(self.img_store_path)
 
     def data_base_init(self):
+        print 'ScrapImg instance init'
         if not os.path.exists(self.db_path):
             self.con = sqlite3.connect(self.db_path)
             self.con.execute('CREATE TABLE page_record(\
@@ -192,71 +219,82 @@ class ScrapImg:
         else:
             self.con = sqlite3.connect(self.db_path)
 
-    def add_page_record(self, page_id,url, description):
+    def add_page_record(self, page_id, url, description):
         now = datetime.datetime.now()
+        con = sqlite3.connect(self.db_path)
         try:
-            self.con.execute('INSERT INTO page_record VALUES (?,?,?,?,?,?)', (page_id, url, 0, description.decode('utf-8'), 0, now))
-            self.con.commit()
+            con.execute('INSERT INTO page_record VALUES (?,?,?,?,?,?)', (page_id, url, 0, description.decode('utf-8'), 0, now,))
+            con.commit()
         except:
             e = sys.exc_info()[0]
             print 'add_check_record except:' + str(e)
-            debug_info(e)
+        con.close()
         pass
 
     def add_img_record(self, img_url, page_id, description):
         now = datetime.datetime.now()
+        con = sqlite3.connect(self.db_path)
         try:
-            self.con.execute('INSERT INTO img_record VALUES (?,?,?,?,?,?)', (img_url, page_id, 0, description.decode('utf-8'), 0, now))
-            self.con.commit()
+            con.execute('INSERT INTO img_record VALUES (?,?,?,?,?,?)', (img_url, page_id, 0, description.decode('utf-8'), 0, now))
+            con.commit()
         except:
             e = sys.exc_info()[0]
             print 'add_img_record except:' + str(e)
             debug_info(e)
+        con.close()
         pass
 
     def check_page_record(self,page_id):
+        con = sqlite3.connect(self.db_path)
         try:
-            self.con.execute('update page_record set is_done=1\
+            con.execute('update page_record set is_done=1\
             where page_id=(?)', ( page_id, ))
-            self.con.commit()
+            con.commit()
         except:
             e = sys.exc_info()[0]
             print 'check_page_record except:' + str(e)
             debug_info('check_page_record except:' + str(e))
+        con.close()
         pass
 
     def check_img_record(self, page_url):
+        con = sqlite3.connect(self.db_path)
         try:
-            self.con.execute('update img_record set is_done=1\
+            con.execute('update img_record set is_done=1\
             where img_url=(?)', ( page_url, ))
-            self.con.commit()
+            con.commit()
         except:
             e = sys.exc_info()[0]
             print 'add_img_record except:' + str(e)
             debug_info('check_img_record except:' + str(e))
+        con.close()
         pass
 
     def get_page_record(self, page_id):
         now = datetime.datetime.now()
+        con = sqlite3.connect(self.db_path)
         try:
-            self.con.execute('select * from page_record where page_record.page_id=(?)',(page_id, ))
-            self.con.commit()
+            con.execute('select * from page_record where page_record.page_id=(?)',(page_id, ))
+            con.commit()
 
         except:
             e = sys.exc_info()[0]
             print 'add_check_record except:' + str(e)
             debug_info(e)
+        con.close()
         pass
 
     def get_imgurl_of_page_record(self, page_id):
         now = datetime.datetime.now()
+        con = sqlite3.connect(self.db_path)
         try:
-            self.con.execute('select * from img_record where img_record.page_id=(?)', (page_id,))
-            self.con.commit()
+            con.execute('select * from img_record where img_record.page_id=(?)', (page_id,))
+            con.commit()
         except:
             e = sys.exc_info()[0]
             print 'add_check_record except:' + str(e)
             debug_info(e)
+        con.close()
         pass
 
     def filter_page_urls(self, data):
@@ -289,7 +327,7 @@ class ScrapImg:
         try_count = 0
         err_flag = 0
         for page in range(1, 1000):
-            page_url = 'http://hkpic-forum.xyz/forum-18-%d' % page + '.html'
+            page_url = 'http://hkbbcc.net/forum-18-%d' % page + '.html'
             print page_url
             req_login = urllib2.Request(
                 url=page_url,
@@ -323,14 +361,12 @@ class ScrapImg:
         #    fd.write(data)
         pass
 
-    def parse_single_page_pipe(self, index, con):
+    def parse_pages_pipe(self, index, db_con):
         http_headers = {'User-Agent': 'Mozilla/5.0 (X11; Linux i686; rv:8.0) Gecko/20100101 Firefox/8.0',
                         'Referer': 'http://hkpic-forum.xyz/forum.php?gid=1',
                         }
-        min_page = 4271873
         try_count = 0
-        err_flag = 0
-        page_url = 'http://hkpic-forum.xyz/forum-18-%d' % index + '.html'
+        page_url = 'http://hkbbcc.net/forum-18-%d' % index + '.html'
         print page_url
         req_login = urllib2.Request(
             url=page_url,
@@ -354,7 +390,7 @@ class ScrapImg:
             else:
                 break
         page_list = self.filter_page_urls(data)
-        con.send(page_list)
+        db_con.send(page_list)
         pass
 
     def parse_single_page_data(self, page_url):
@@ -386,34 +422,6 @@ class ScrapImg:
                 break
         return data
         pass
-
-    def parse_pages_imgurls_from_pageurl_pipe(self, con, record_con):
-        while True:
-            if con.poll(3):
-                page_record = con.recv()  # prints "[42, None, 'hello']"
-                if type(page_record) == str and page_record == 'quit':
-                    print "done"
-                    break
-                data = self.parse_single_page_data(page_record['url'])
-                if data:
-                    img_urls = self.get_imgurls_from_data(data)
-                for imgurl in img_urls:
-                    record_con.send(imgurl)
-            else:
-                print 'parse_pages_imgurls_from_pageurl_pipe need more task'
-                con.send('ask')
-
-    def parse_imgdata_from_imgurl_pipe(self, con):
-        while True:
-            if con.poll(3):
-                img_record = con.recv()  # prints "[42, None, 'hello']"
-                if type(img_record) == str and img_record == 'quit':
-                    print "done"
-                    break
-                self.download_img(img_record['url'])
-            else:
-                print 'parse_imgdata_from_imgurl_pipe need more task'
-                con.send('ask')
 
     def get_imgurls_from_data(self, data):
         # http://img.bipics.net/data/attachment/forum/201610/14/101421bvx3f83jvq4xyyo3.jpg"
@@ -465,21 +473,43 @@ class ScrapImg:
                 debug_info(e)
         pass
 
-    def ask_pages_to_process(self, con):
+    def parse_pages_imgurls_from_pageurl_pipe(self, con, record_con):
         while True:
             if con.poll(3):
-                tmp = con.recv()  # prints "[42, None, 'hello']"
-                if type(tmp) == str and tmp == 'quit':
+                page_record = con.recv()  # prints "[42, None, 'hello']"
+                if type(page_record) == str and page_record == 'quit':
                     print "done"
                     break
-                print tmp
-                time.sleep(1)
+                data = self.parse_single_page_data(page_record['url'])
+                if data:
+                    img_urls = self.get_imgurls_from_data(data)
+                for imgurl in img_urls:
+                    record_con.send(imgurl)
             else:
-                print 'timeout'
+                print 'parse_pages_imgurls_from_pageurl_pipe need more task'
                 con.send('ask')
+
+    def parse_imgdata_from_imgurl_pipe(self, con):
+        while True:
+            if con.poll(3):
+                img_record = con.recv()  # prints "[42, None, 'hello']"
+                if type(img_record) == str and img_record == 'quit':
+                    print "done"
+                    break
+                self.download_img(img_record['url'])
+            else:
+                print 'parse_imgdata_from_imgurl_pipe need more task'
+                con.send('ask')
+
+    def get_pages_to_process(self, max=20):
+        con = sqlite3.connect(self.db_path)
+        cur = con.execute("select * from page_record where page_record.is_done=0 limit (?)", (max,))
+        ret_list =cur.fetchall()
+        print type(ret_list)
+        print ret_list
         pass
 
-    def ask_imgs_to_process(self, con):
+    def get_imgs_to_process(self, con):
         while True:
             if con.poll(3):
                 tmp = con.recv()  # prints "[42, None, 'hello']"
@@ -505,25 +535,23 @@ class ScrapImg:
             self.check_page_record(img_record['img_url'])
         pass
 
-    def pipe_single_handle_pageurl_store(self, con):
+    def pipe_handle_pages_store(self, con):
         while True:
-            page_record = con.recv()
-            self.check_page_record(page_record['page_id'])
+            page_records = con.recv()
+            if type(page_records) == str and page_records == 'quit':
+                print 'pipe_single_handle_pageurl_store received command to quit!'
+                return
+            for page_record in page_records:
+                print page_record
+                self.add_page_record(page_record['page_id'], page_record['url'], page_record['description'])
 
     def start_parse(self):
-        parent_conn, child_conn = Pipe()
-        p = multiprocessing.Process(target=self.ask_pages_to_process, args=(child_conn,) )
+        parent_con, child_conn = Pipe()
+        p = multiprocessing.Process(target=self.pipe_handle_pages_store, args=(child_conn,) )
         p.start()
-        p = multiprocessing.Process(target=self.ask_pages_to_process, args=(child_conn,) )
-        p.start()
-        for y in range(10):
-            for i in range(10):
-                parent_conn.send(i)
-            tmp = parent_conn.recv()
-            print 'give more'
-        parent_conn.send('quit')
-        parent_conn.send('quit')
-        parent_conn.close()
+        self.parse_pages_pipe(1, parent_con)
+        parent_con.send('quit')
+        parent_con.close()
         pass
 
 
@@ -546,7 +574,9 @@ if __name__ == '__main__':
     #hk_login.do_login()
 
     scrap = ScrapImg()
-    #scrap.add_page_record(1,'url', '你好'.decode('utf-8'))
+    #scrap.start_parse()
+    scrap.get_pages_to_process(max=10)
+    #scrap.add_page_record(1,'fuckxxx', '你好')
     #scrap.add_img_record(1,'url', 'http://', '你好')
     #data = hk_login.get_url_data('http://hkpic-forum.xyz/thread-4244506-1-1.html')
     #with open('page.html', 'r') as fd:
@@ -556,6 +586,6 @@ if __name__ == '__main__':
     #    fd.write(data)
     #scrap.filter_page_urls('xx')
     #scrap.generate_page_url()
-    scrap.start_parse()
+    #scrap.start_parse()
     #scrap.download_img('http://img.bipics.net/data/attachment/block/aa/aab8bb730c4e2c4dc489128235424dc9.jpg')
     #print hk_login
