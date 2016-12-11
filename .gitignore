@@ -53,3 +53,7 @@ hk_check_login_result.html
 *.html
 *.html
 cookie
+*.png
+*.pyc
+cookie
+*.log
