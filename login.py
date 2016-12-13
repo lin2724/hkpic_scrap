@@ -189,6 +189,9 @@ img_folder = img')
         return data
 
 
+class MyUrlOpenErr(Exception):
+    pass
+
 class ScrapImg:
     def __init__(self):
         self.db_path = 'record.db'
@@ -244,7 +247,7 @@ class ScrapImg:
             con.commit()
         except:
             e = sys.exc_info()[0]
-            print 'add_page_record except:' + str(e)
+            #print 'add_page_record except:' + str(e)
         con.close()
         pass
 
@@ -267,8 +270,8 @@ class ScrapImg:
             con.commit()
         except:
             e = sys.exc_info()[0]
-            print 'add_img_record except:' + str(e)
-            debug_info(e)
+            #print 'add_img_record except:' + str(e)
+            debug_info(3, e)
         con.close()
         pass
 
@@ -280,8 +283,8 @@ class ScrapImg:
             con.commit()
         except:
             e = sys.exc_info()[0]
-            print 'check_page_record except:' + str(e)
-            debug_info('check_page_record except:' + str(e))
+            #print 'check_page_record except:' + str(e)
+            debug_info(3, 'check_page_record except:' + str(e))
         con.close()
         pass
 
@@ -301,8 +304,8 @@ class ScrapImg:
             con.commit()
         except:
             e = sys.exc_info()[0]
-            print 'check_img_record except:' + str(e)
-            debug_info('check_img_record except:' + str(e))
+            #print 'check_img_record except:' + str(e)
+            debug_info(3, 'check_img_record except:' + str(e))
         con.close()
         pass
 
@@ -324,7 +327,7 @@ class ScrapImg:
         except:
             e = sys.exc_info()[0]
             print 'get_page_record except:' + str(e)
-            debug_info(e)
+            debug_info(3, e)
         con.close()
         pass
 
@@ -337,7 +340,7 @@ class ScrapImg:
         except:
             e = sys.exc_info()[0]
             print 'get_imgurl_of_page_record except:' + str(e)
-            debug_info(e)
+            debug_info(3, e)
         con.close()
         pass
 
@@ -353,7 +356,7 @@ class ScrapImg:
         ret_list = list()
         for url in m:
             (main_id, sub_url, title) = url
-            print 'thread-' + main_id + sub_url + title
+            #print 'thread-' + main_id + sub_url + title
             tmp_dict = dict()
             tmp_dict['page_id'] = int(main_id)
             tmp_dict['url'] = 'http://hkbbcc.net/thread-'+ main_id + sub_url
@@ -387,7 +390,7 @@ class ScrapImg:
                     if try_count > 10:
                         try_count = 0
                         print 'page parse fail : %s' % page_url
-                        debug_info('page parse fail url:' + page_url)
+                        debug_info(1, 'page parse timeout fail url:' + page_url)
                         break
                     else:
                         print 'url parse timeout, try again %d:%s' %(try_count, page_url)
@@ -397,7 +400,7 @@ class ScrapImg:
 
             page_records =  self.get_page_records_from_data(data)
             for page_record in page_records:
-                print 'store page %s' % str(page)
+                #print 'store page %s' % str(page)
                 self.add_page_record(page_record['page_id'], page_record['url'], page_record['title'])
             #e = sys.exc_info()[0]
             #print e
@@ -429,17 +432,22 @@ class ScrapImg:
                     if len(page_records) == 0:
                         with open('page_data.html', 'w+') as fd:
                             fd.write(data)
+                        print 'homepage done:%s' % page_url
                     else:
                         db_queue.put(page_records)
                 except socket.timeout:
                     if try_count >= 3:
                         print 'page parse fail : %s' % page_url
-                        debug_info('page parse fail url:' + page_url)
+                        debug_info(1, 'page parse timeout fail url:' + page_url)
                         break
                     else:
                         print 'url parse timeout, try again %d:%s' % (try_count, page_url)
                         try_count += 1
                         continue
+                except:
+                    e = sys.exc_info()[0]
+                    print 'ERROR:urlopen fail %s' % str(e)
+                    debug_info(0, e)
                 break
             pass
 
@@ -448,29 +456,33 @@ class ScrapImg:
         http_headers = {'User-Agent': 'Mozilla/5.0 (X11; Linux i686; rv:8.0) Gecko/20100101 Firefox/8.0',
                         'Referer': 'http://hkpic-forum.xyz/forum.php?gid=1',
                         }
-        try_count = 0
-        print page_url
+
+        debug_info(5, page_url)
         req_login = urllib2.Request(
             url=page_url,
             headers=http_headers,
         )
+        try_count = 0
+        data = None
         while True:
             try:
                 data = urllib2.urlopen(req_login, timeout=10).read()
-                err_flag = 0
-            except:
-                err_flag = 1
-            if err_flag:
-                if try_count > 10:
-                    try_count = 0
+                try_count = 0
+                break
+            except socket.timeout:
+                try_count += 1
+                if try_count >self.page_download_trytime:
                     print 'detail page parse fail : %s' % page_url
-                    debug_info('detail page parse fail url:' + page_url)
-                    return None
+                    debug_info(1, 'detail page parse timeout fail url:' + page_url)
+                    break
                 else:
                     print 'url parse timeout, try again %d:%s' % (try_count, page_url)
-                    try_count += 1
-            else:
-                break
+                    continue
+            except:
+                e = sys.exc_info()[0]
+                print 'ERROR:open url fail %s' % str(e)
+                debug_info(0, e)
+                raise MyUrlOpenErr('ERROR:open url fail %s' % str(e))
         return data
         pass
 
@@ -539,10 +551,16 @@ class ScrapImg:
                 except socket.timeout:
                     if try_count >= self.img_download_trytime:
                         print 'download img fail %s' % url
+                        debug_info(5, 'download img fail %s' % url)
                         return False
                     else:
                         try_count += 1
                         print 'try again to download %s' % url
+                except:
+                    e = sys.exc_info()[0]
+                    print 'ERROR:download img fail %s' % str(e)
+                    debug_info(0, e)
+                    raise MyUrlOpenErr('ERROR:download img fail %s' % str(e))
         return ret
         pass
 
@@ -557,7 +575,11 @@ class ScrapImg:
                 (img_url, page_id, description, id_done, record_time) = img_record
                 with filename_mutex:
                     img_name = self.give_imgfile_name(page_id=page_id,img_tail=self.get_img_tail(img_url))
-                ret = self.download_img(urls=img_url, img_name=img_name)
+                try:
+                    ret = self.download_img(urls=img_url, img_name=img_name)
+                    print 'img download done %s' % img_name
+                except MyUrlOpenErr:
+                    continue #unexpect err has happend,pass this url
                 if not ret:
                     img_record_dict = dict()
                     img_record_dict['img_url'] = img_url
@@ -571,23 +593,24 @@ class ScrapImg:
         self.build_openner_with_cookie()
         while True:
             page_records = task_queue.get()  # prints "[42, None, 'hello']"
-            print page_records
+            #print page_records
             if type(page_records) == str and page_records == 'quit':
-                print "done"
                 break
             for page_record in page_records:
-                print page_record
                 (page_id,url,_,description,_,record_time) = page_record
-                data = self.parse_single_page_data(url)
+                try:
+                    data = self.parse_single_page_data(url)
+                except MyUrlOpenErr:
+                    continue #pass this url as if it has been done
+                    pass
                 if data:
-                    #imgurl_records = list()
                     img_urls = self.get_imgurls_from_data(data)
+                    print 'page get imgurls done %s' % url
                     for img_url in img_urls:
                         imgurl_record = dict()
                         imgurl_record['img_url'] = img_url
                         imgurl_record['page_id'] = page_id
                         imgurl_record['description'] = description
-                        #imgurl_records.append(imgurl_record)
                         db_store_queue.put(imgurl_record)
                 else:
                     page_record_dict = dict()
@@ -600,7 +623,7 @@ class ScrapImg:
             if con.poll(3):
                 img_record = con.recv()  # prints "[42, None, 'hello']"
                 if type(img_record) == str and img_record == 'quit':
-                    print "done"
+                    #print "done"
                     break
                 self.download_img(img_record['url'])
             else:
@@ -776,12 +799,15 @@ class ScrapImg:
         p = multiprocessing.Process(target=self.start_imgurl_parse_task )
         p.start()
         time.sleep(20)
-        #p = multiprocessing.Process(target=self.start_img_download_task )
-        #p.start()
+        p = multiprocessing.Process(target=self.start_img_download_task )
+        p.start()
         pass
 
 
-def debug_info(information):
+def debug_info(level, information):
+    debug_level = 1
+    if level > debug_level:
+        return
     debug_file = 'debug.log'
     if not os.path.exists('debug.log'):
         with open(debug_file, 'w+') as fd:
