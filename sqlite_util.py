@@ -140,26 +140,28 @@ class DBHandler:
         cur = self.con.cursor()
         tup_items = cur.fetchall()
         ret_row_list = list()
+        print 'get [%d]' % len(tup_items)
         for tup_item in tup_items:
             row = DBRowHuaBan()
             row.load(tup_item)
             ret_row_list.append(row)
         return ret_row_list
 
-    def insert_row(self, db_row, limit):
+    def insert_row(self, db_row):
         # db_row = DBRowHuaBan()
         command = db_row.generate_insert_cmd__str(self.table_name)
-        print command
+        command += ' where %s.%s != 0 ' % (self.table_name, huaban_row.item_list[3].name)
+        # print command
         try:
             self.con.execute(command)
             self.con.commit()
         except sqlite3.IntegrityError:
             pass
 
-    def update_row(self, db_row, limit):
+    def update_row(self, db_row):
         # db_row = DBRowHuaBan()
         command = db_row.generate_update_cmd__str(self.table_name)
-        print command
+        # print command
         self.con.execute(command)
         self.con.commit()
 

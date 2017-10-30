@@ -5,6 +5,8 @@ import requests
 from lxml import etree
 from lxml import html
 from io import StringIO
+import urllib2
+import hashlib
 
 
 class ScrapLogin:
@@ -97,7 +99,13 @@ class PPPageNode:
         self.title = ''
         self.url = ''
         self.parent_node = None
+        self.db_handler = None
+        self.do_init()
         pass
+
+    def do_init(self):
+        pass
+
 
     def do_parse(self):
         pass
@@ -151,13 +159,26 @@ class PPPageNode:
         return valid_title
         pass
 
+from sqlite_util import DBRow, DBRowHuaBan, DBHandler
+
 
 class PPFrontPageNode(PPPageNode):
-    def do_parse(self):
+    def do_init(self):
+        self.db_handler = DBHandler()
+        self.db_handler.load('sex.db')
+        self.db_handler.add_table('sex')
+
+        self.set_store_img_path = 'img'
+
+        if not os.path.exists(self.set_store_img_path):
+            os.mkdir(self.set_store_img_path)
+        pass
+
+    def do_parse(self, start_url=None):
         url2content_handle = ScrapUrls2Content()
 
-        start_url = 'http://www.sex.com/'
-        start_url = self.url
+        if not start_url:
+            start_url = self.url
         self.content = url2content_handle.run_parse(start_url)
         write_content(self.content, 'start.html')
 
@@ -165,6 +186,7 @@ class PPFrontPageNode(PPPageNode):
         channel_unit_tr_nodes = tr.xpath('//a[@class="image_wrapper"]/img[@class="image"]')
         for channel_unit_tr_node in channel_unit_tr_nodes:
             print channel_unit_tr_node.attrib['data-src']
+            self.store_url_data(channel_unit_tr_node.attrib['data-src'])
             continue
             a_nodes = channel_unit_tr_node.xpath('a[@class="bn_a"]')
             if len(a_nodes):
@@ -183,7 +205,17 @@ class PPFrontPageNode(PPPageNode):
                 channel_node.init_node(url, title)
                 channel_unit_node.add_sub_node(channel_node)
 
+    def do_auto_parse(self):
+        max_page_id = self.get_last_page()
+        start_url = self.url[:]
+        for idx in range(1, max_page_id+1):
+            cur_url = start_url + '?page=%d' % idx
+            self.do_parse(cur_url)
+            print cur_url
+        pass
+
     def get_last_page(self):
+        ret_page_id = 0
         url2content_handle = ScrapUrls2Content()
 
         start_url = 'http://www.sex.com/'
@@ -194,10 +226,72 @@ class PPFrontPageNode(PPPageNode):
         tr = etree.HTML(self.content)
         channel_unit_tr_nodes = tr.xpath('//div[@class="btn-group btn-group-lg"]/a[@class="btn btn-default"]')
         if channel_unit_tr_nodes:
-            print channel_unit_tr_nodes[len(channel_unit_tr_nodes)-1].attrib['href']
+            max_page_info = channel_unit_tr_nodes[len(channel_unit_tr_nodes)-1].attrib['href']
+            pattern = u'page=(?P<page_id>\d+)'
+            m = re.search(pattern, max_page_info)
+            if m:
+                print m.group('page_id')
+                ret_page_id = int(m.group('page_id'))
+            else:
+                print 'Not Found page id from %s' % max_page_info
         else:
             print 'Not found last page'
+        return ret_page_id
         pass
+
+    def store_url_data(self, img_url):
+        db_row = DBRowHuaBan()
+        # base_url
+        db_row.item_list[0].value = self.url[:]
+        # url
+        db_row.item_list[1].value = img_url[:]
+        # url_hash
+        m = hashlib.md5()
+        m.update(img_url)
+        db_row.item_list[2].value =m.hexdigest()[:]
+        # is_done
+        db_row.item_list[3].value = 0
+        self.db_handler.insert_row(db_row)
+        # print db_row
+        pass
+
+    def do_login(self):
+        pass
+
+    def get_content(self, url=None):
+        rows = self.db_handler.get_row(10)
+        headers = {'user-agent': 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:56.0) Gecko/20100101 Firefox/56.0',
+                   'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                   'accept-language': 'en-US,en;q=0.5',
+                   'accept-encoding': 'gzip, deflate, br',
+                   'referer': 'http://www.sex.com/',
+                   }
+        for row in rows:
+            url = row.item_list[1].value
+            # url = 'https://images.sex.com/images/pinporn/2017/10/29/300/18578507.jpg'
+            print 'start get download %s' % url
+            try:
+                r = requests.get(url, headers=headers)
+            except KeyboardInterrupt:
+                print 'Quit'
+                return
+            except:
+                'Request err'
+                continue
+                pass
+            if 200 == r.status_code:
+                print 'Succeed get pic'
+                row.item_list[3].value = 1
+                self.db_handler.update_row(row)
+                img_path = os.path.join(self.set_store_img_path, row.item_list[2].value)
+                with open(img_path, 'wb+') as fd:
+                    fd.write(r.content)
+
+            else:
+                print 'Failed to get pic'
+
+        pass
+
 
     pass
 
@@ -454,8 +548,9 @@ def choose_node(node):
 def main():
     front_page_node = PPFrontPageNode()
     front_page_node.init_node('http://www.sex.com/', u'澎湃')
-    front_page_node.do_parse()
-    front_page_node.get_last_page()
+    # front_page_node.do_parse()
+    # front_page_node.do_auto_parse()
+    front_page_node.get_content()
     return
 
     channel_unit_node = choose_node(front_page_node)
