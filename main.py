@@ -5,8 +5,13 @@ import requests
 from lxml import etree
 from lxml import html
 from io import StringIO
-import urllib2
+import time
 import hashlib
+import sys
+import threading
+
+
+from common_lib import MyArgParse, LogHandle
 
 
 class ScrapLogin:
@@ -169,7 +174,19 @@ class PPFrontPageNode(PPPageNode):
         self.db_handler.add_table('sex')
 
         self.set_store_img_path = 'img'
+        self.flag_quit = False
+        self.log_handler = LogHandle('sex_srap.log')
+        self.log = self.log_handler.log
 
+        self.set_thread_cnt = 6
+
+        self.info_run_thread_cnt = 0
+        self.info_succeed_cnt = 0
+        self.info_failed_cnt = 0
+
+        self.task_row_list = list()
+        self.task_update_row_list = list()
+        self.lock = threading.RLock()
         if not os.path.exists(self.set_store_img_path):
             os.mkdir(self.set_store_img_path)
         pass
@@ -211,7 +228,7 @@ class PPFrontPageNode(PPPageNode):
         for idx in range(1, max_page_id+1):
             cur_url = start_url + '?page=%d' % idx
             self.do_parse(cur_url)
-            print cur_url
+            self.log(cur_url)
         pass
 
     def get_last_page(self):
@@ -230,12 +247,12 @@ class PPFrontPageNode(PPPageNode):
             pattern = u'page=(?P<page_id>\d+)'
             m = re.search(pattern, max_page_info)
             if m:
-                print m.group('page_id')
+                self.log(m.group('page_id'))
                 ret_page_id = int(m.group('page_id'))
             else:
-                print 'Not Found page id from %s' % max_page_info
+                self.log('Not Found page id from %s' % max_page_info)
         else:
-            print 'Not found last page'
+            self.log('Not found last page')
         return ret_page_id
         pass
 
@@ -259,41 +276,173 @@ class PPFrontPageNode(PPPageNode):
         pass
 
     def get_content(self, url=None):
-        rows = self.db_handler.get_row(10)
+        self.info_run_thread_cnt += 1
+        while True:
+            if self.flag_quit:
+                self.log('thread quit..')
+                self.info_run_thread_cnt -= 1
+                return
+            try:
+                rows = self.db_handler.get_row(10)
+                if not len(rows):
+                    self.log('All done')
+                    return
+                headers = {'user-agent': 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:56.0) Gecko/20100101 Firefox/56.0',
+                           'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                           'accept-language': 'en-US,en;q=0.5',
+                           'accept-encoding': 'gzip, deflate, br',
+                           'referer': 'http://www.sex.com/',
+                           }
+                for row in rows:
+                    url = row.item_list[1].value
+                    self.log('start get download %s' % url)
+                    try:
+                        r = requests.get(url, headers=headers)
+                    except KeyboardInterrupt:
+                        self.log('Quit')
+                        return
+                    except ValueError:
+                        'Request err'
+                        continue
+                        pass
+                    if 200 == r.status_code:
+                        self.log('Succeed get pic')
+                        row.item_list[3].value = 1
+                        self.db_handler.update_row(row)
+                        img_path = os.path.join(self.set_store_img_path, row.item_list[2].value)
+                        with open(img_path, 'wb+') as fd:
+                            fd.write(r.content)
+                        self.info_succeed_cnt += 1
+                    else:
+                        self.log('Failed to get pic')
+                        self.info_failed_cnt += 1
+            except KeyboardInterrupt:
+                self.info_run_thread_cnt -= 1
+                self.flag_quit = True
+                self.log('Recv Ctrl-c thread quit..')
+                return
+            except ValueError:
+                e_str = sys.exc_info()[0]
+                self.log('Exception![%s]' % e_str)
+                pass
+        pass
+
+    def download_thread(self, url=None):
+        self.info_run_thread_cnt += 1
         headers = {'user-agent': 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:56.0) Gecko/20100101 Firefox/56.0',
                    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                    'accept-language': 'en-US,en;q=0.5',
                    'accept-encoding': 'gzip, deflate, br',
                    'referer': 'http://www.sex.com/',
                    }
-        for row in rows:
-            url = row.item_list[1].value
-            # url = 'https://images.sex.com/images/pinporn/2017/10/29/300/18578507.jpg'
-            print 'start get download %s' % url
-            try:
-                r = requests.get(url, headers=headers)
-            except KeyboardInterrupt:
-                print 'Quit'
+        while True:
+            if self.flag_quit:
+                self.log('thread quit..')
+                self.info_run_thread_cnt -= 1
                 return
-            except:
-                'Request err'
-                continue
+            try:
+                row = self.get_one_row_task()
+                if not row:
+                    time.sleep(3)
+                    self.log('No task to precess..')
+                    continue
+                url = row.item_list[1].value
+                self.log('start get download %s' % url)
+                try:
+                    r = requests.get(url, headers=headers)
+                except KeyboardInterrupt:
+                    self.log('Quit')
+                    return
+                except ValueError:
+                    'Request err'
+                    continue
+                    pass
+                if 200 == r.status_code:
+                    self.log('Succeed get pic')
+                    row.item_list[3].value = 1
+                    self.add_update_row(row)
+                    img_path = os.path.join(self.set_store_img_path, row.item_list[2].value)
+                    with open(img_path, 'wb+') as fd:
+                        fd.write(r.content)
+                    self.info_succeed_cnt += 1
+                else:
+                    self.log('Failed to get pic')
+                    self.info_failed_cnt += 1
+            except KeyboardInterrupt:
+                self.info_run_thread_cnt -= 1
+                self.flag_quit = True
+                self.log('Recv Ctrl-c thread quit..')
+                return
+            except ValueError:
+                e_str = sys.exc_info()[0]
+                self.log('Exception![%s]' % e_str)
                 pass
-            if 200 == r.status_code:
-                print 'Succeed get pic'
-                row.item_list[3].value = 1
-                self.db_handler.update_row(row)
-                img_path = os.path.join(self.set_store_img_path, row.item_list[2].value)
-                with open(img_path, 'wb+') as fd:
-                    fd.write(r.content)
+        pass
 
-            else:
-                print 'Failed to get pic'
-
+    def start_auto_download(self):
+        set_period = 10
+        for idx in range(self.set_thread_cnt):
+            pro = threading.Thread(target=self.download_thread)
+            pro.start()
+        while True:
+            try:
+                self.get_task_from_db()
+                self.do_update_row()
+                succeed_cnt = self.info_succeed_cnt
+                time.sleep(set_period)
+                speed = (self.info_succeed_cnt - succeed_cnt) / set_period
+                self.log('Thread[%d], speed [%d]pic/s' % (self.info_run_thread_cnt, speed))
+            except KeyboardInterrupt:
+                e_str = sys.exc_info()[0]
+                self.log('Exception![%s]' % e_str)
+                return
         pass
 
 
-    pass
+    def set_store_path(self, path):
+        self.set_store_img_path = path[:]
+        if not os.path.exists(self.set_store_img_path):
+            os.mkdir(self.set_store_img_path)
+        pass
+
+
+    def get_one_row_task(self):
+        self.lock.acquire()
+        ret_row = None
+        if not len(self.task_row_list):
+            ret_row = None
+        else:
+            ret_row = self.task_row_list.pop()
+        self.lock.release()
+        return ret_row
+        pass
+
+    def get_task_from_db(self):
+        if len(self.task_row_list) > 50:
+            return
+        rows = self.db_handler.get_row(100)
+        if not len(rows):
+            self.log('Get zero row, maybe all task done, quit..')
+            self.flag_quit = True
+            return
+        self.task_row_list.extend(rows)
+        pass
+
+    def do_update_row(self):
+        if not len(self.task_update_row_list):
+            return
+        row = self.task_update_row_list.pop()
+        self.db_handler.update_row(row)
+        return
+        pass
+
+    def add_update_row(self, row):
+        self.lock.acquire()
+
+        self.task_update_row_list.append(row)
+
+        self.lock.release()
+        pass
 
 
 class PPChannelUnitPageNode(PPPageNode):
@@ -545,12 +694,45 @@ def choose_node(node):
     pass
 
 
+def arg_parser_init():
+    arg_parse = MyArgParse()
+    arg_parse.add_option('-parse', [0, 1], 'parse img url')
+    arg_parse.add_option('-url', [0, 1], 'parse img url')
+    arg_parse.add_option('-download', [0, 1], 'download imgs')
+    arg_parse.add_option('-d', [1], 'set img store folder')
+
+    return arg_parse
+
+gLogHandler = LogHandle('sex_scrap.log')
+
+
 def main():
+    arg_handler = arg_parser_init()
+    if not arg_handler.parse(sys.argv):
+        print arg_handler
+        return
     front_page_node = PPFrontPageNode()
-    front_page_node.init_node('http://www.sex.com/', u'澎湃')
+    start_url = 'http://www.sex.com/'
+    if arg_handler.check_option('-parse'):
+        if arg_handler.check_option('-url'):
+            start_url = arg_handler.get_option_args('-url')[0]
+        gLogHandler.log('Parse [%s]' % start_url)
+        front_page_node.init_node(start_url, 'sex')
+        front_page_node.do_auto_parse()
+        gLogHandler.log('Parse [%s] Done' % start_url)
+        return
+    elif arg_handler.check_option('-download'):
+        gLogHandler.log('Start download')
+        # front_page_node.get_content()
+        front_page_node.start_auto_download()
+        gLogHandler.log('Download Done')
+        return
+    else:
+        print arg_handler
+        return
     # front_page_node.do_parse()
     # front_page_node.do_auto_parse()
-    front_page_node.get_content()
+
     return
 
     channel_unit_node = choose_node(front_page_node)
