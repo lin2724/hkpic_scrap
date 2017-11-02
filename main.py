@@ -256,6 +256,14 @@ class PPFrontPageNode(PPPageNode):
         return ret_page_id
         pass
 
+    def get_store_file_path(self, row):
+        img_path = os.path.join(self.set_store_img_path, row.item_list[2].value)
+        file_tail = row.item_list[1].value.splite('.')[-1]
+        img_path += '.' + file_tail
+        return img_path
+        pass
+
+
     def store_url_data(self, img_url):
         db_row = DBRowHuaBan()
         # base_url
@@ -309,7 +317,8 @@ class PPFrontPageNode(PPPageNode):
                         self.log('Succeed get pic')
                         row.item_list[3].value = 1
                         self.db_handler.update_row(row)
-                        img_path = os.path.join(self.set_store_img_path, row.item_list[2].value)
+                        # img_path = os.path.join(self.set_store_img_path, row.item_list[2].value)
+                        img_path = self.get_store_file_path(row)
                         with open(img_path, 'wb+') as fd:
                             fd.write(r.content)
                         self.info_succeed_cnt += 1
@@ -361,7 +370,8 @@ class PPFrontPageNode(PPPageNode):
                     self.log('Succeed get pic')
                     row.item_list[3].value = 1
                     self.add_update_row(row)
-                    img_path = os.path.join(self.set_store_img_path, row.item_list[2].value)
+                    # img_path = os.path.join(self.set_store_img_path, row.item_list[2].value)
+                    img_path = self.get_store_file_path(row)
                     with open(img_path, 'wb+') as fd:
                         fd.write(r.content)
                     self.info_succeed_cnt += 1
@@ -391,20 +401,19 @@ class PPFrontPageNode(PPPageNode):
                 succeed_cnt = self.info_succeed_cnt
                 time.sleep(set_period)
                 speed = (self.info_succeed_cnt - succeed_cnt) / set_period
-                self.log('Thread[%d], speed [%d]pic/s' % (self.info_run_thread_cnt, speed))
+                self.log('Thread[%d], succeed [%d], failed [%d], speed [%d]pic/s' %
+                         (self.info_run_thread_cnt, self.info_succeed_cnt, self.info_failed_cnt,speed))
             except KeyboardInterrupt:
                 e_str = sys.exc_info()[0]
                 self.log('Exception![%s]' % e_str)
                 return
         pass
 
-
     def set_store_path(self, path):
         self.set_store_img_path = path[:]
         if not os.path.exists(self.set_store_img_path):
             os.mkdir(self.set_store_img_path)
         pass
-
 
     def get_one_row_task(self):
         self.lock.acquire()
