@@ -191,6 +191,14 @@ class PPFrontPageNode(PPPageNode):
             os.mkdir(self.set_store_img_path)
         pass
 
+    def set_download_folder(self, folder_path):
+        self.set_store_img_path = folder_path[:]
+        self.log('Set Store Folder to [%s]' % self.set_store_img_path)
+
+    def set_down_thread(self, thread_cnt):
+        self.set_thread_cnt = thread_cnt
+        self.log('Set thread num to [%s]' % self.set_thread_cnt)
+
     def do_parse(self, start_url=None):
         url2content_handle = ScrapUrls2Content()
 
@@ -258,11 +266,10 @@ class PPFrontPageNode(PPPageNode):
 
     def get_store_file_path(self, row):
         img_path = os.path.join(self.set_store_img_path, row.item_list[2].value)
-        file_tail = row.item_list[1].value.splite('.')[-1]
+        file_tail = row.item_list[1].value.split('.')[-1]
         img_path += '.' + file_tail
         return img_path
         pass
-
 
     def store_url_data(self, img_url):
         db_row = DBRowHuaBan()
@@ -370,7 +377,6 @@ class PPFrontPageNode(PPPageNode):
                     self.log('Succeed get pic')
                     row.item_list[3].value = 1
                     self.add_update_row(row)
-                    # img_path = os.path.join(self.set_store_img_path, row.item_list[2].value)
                     img_path = self.get_store_file_path(row)
                     with open(img_path, 'wb+') as fd:
                         fd.write(r.content)
@@ -708,7 +714,9 @@ def arg_parser_init():
     arg_parse.add_option('-parse', [0, 1], 'parse img url')
     arg_parse.add_option('-url', [0, 1], 'parse img url')
     arg_parse.add_option('-download', [0, 1], 'download imgs')
+    arg_parse.add_option('-thread', [1], 'set thread count')
     arg_parse.add_option('-d', [1], 'set img store folder')
+    arg_parse.add_option('-h', [0], 'print help')
 
     return arg_parse
 
@@ -717,11 +725,18 @@ gLogHandler = LogHandle('sex_scrap.log')
 
 def main():
     arg_handler = arg_parser_init()
-    if not arg_handler.parse(sys.argv):
+    if not arg_handler.parse(sys.argv) or arg_handler.check_option('-h'):
         print arg_handler
         return
+
     front_page_node = PPFrontPageNode()
     start_url = 'http://www.sex.com/'
+    if arg_handler.check_option('-d'):
+        front_page_node.set_download_folder(arg_handler.get_option_args('-d')[0])
+
+    if arg_handler.check_option('-thread'):
+        front_page_node.set_down_thread(int(arg_handler.get_option_args('-thread')[0]))
+
     if arg_handler.check_option('-parse'):
         if arg_handler.check_option('-url'):
             start_url = arg_handler.get_option_args('-url')[0]
