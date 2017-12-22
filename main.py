@@ -402,8 +402,8 @@ class PPFrontPageNode(PPPageNode):
             pro.start()
         while True:
             try:
-                self.get_task_from_db()
                 self.do_update_row()
+                self.get_task_from_db()
                 succeed_cnt = self.info_succeed_cnt
                 time.sleep(set_period)
                 speed = (self.info_succeed_cnt - succeed_cnt) / set_period
@@ -435,7 +435,7 @@ class PPFrontPageNode(PPPageNode):
     def get_task_from_db(self):
         if len(self.task_row_list) > 50:
             return
-        rows = self.db_handler.get_row(100)
+        rows = self.db_handler.get_row(1000)
         if not len(rows):
             self.log('Get zero row, maybe all task done, quit..')
             self.flag_quit = True
@@ -446,8 +446,10 @@ class PPFrontPageNode(PPPageNode):
     def do_update_row(self):
         if not len(self.task_update_row_list):
             return
-        row = self.task_update_row_list.pop()
-        self.db_handler.update_row(row)
+        cnt = len(self.task_update_row_list)
+        for i in range(cnt):
+            row = self.task_update_row_list.pop()
+            self.db_handler.update_row(row)
         return
         pass
 
