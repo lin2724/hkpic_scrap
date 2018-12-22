@@ -22,6 +22,9 @@ import socket
 import mutex
 import Queue
 from multiprocessing import Process, Pipe
+from common_lib import MyArgParse
+from common_lib import LogHandle
+gstLogHandler = LogHandle('hkpic.log')
 
 Config_Path = 'config.ini'
 Cookie_Path = 'cookie'
@@ -29,9 +32,10 @@ Cookie_Path = 'cookie'
 
 class LoginMethod:
     def __init__(self, set_get_cookie = False):
-        self.login_url = 'http://hkbbcc.net/member.php?mod=logging&action=login&loginsubmit=yes&infloat=yes&lssubmit=yes&inajax=1'
+        self.log = gstLogHandler.log
+        self.login_url = 'http://hk-pic2.xyz/member.php?mod=logging&action=login&loginsubmit=yes&infloat=yes&lssubmit=yes&inajax=1'
         #http://hkpic-forum.xyz/member.php?mod=logging&action=login&loginsubmit=yes&infloat=yes&lssubmit=yes&inajax=1
-        self.status_url = 'http://hkbbcc.net/forum.php'#http://hkpic-forum.xyz/forum.php
+        self.status_url = 'http://hk-pic2.xyz/forum-18-2.html'#http://hkpic-forum.xyz/forum.php
         self.config_file_path = Config_Path
         self.cookie_file_path = Cookie_Path
         self.username = ''
@@ -192,10 +196,12 @@ img_folder = img')
 class MyUrlOpenErr(Exception):
     pass
 
+
 class ScrapImg:
     def __init__(self):
+        self.log = gstLogHandler.log
         self.db_path = 'record.db'
-        self.img_store_path = 'img'
+        self.img_store_path = ''
         self.max_thread = 20
         self.img_download_trytime = 5
         self.page_download_trytime = 3
@@ -206,6 +212,10 @@ class ScrapImg:
 
     def do_init(self):
         self.data_base_init()
+        self.set_store_folder('Imgs')
+
+    def set_store_folder(self, folder_path):
+        self.img_store_path = folder_path
         if not os.path.exists(self.img_store_path):
             os.mkdir(self.img_store_path)
 
@@ -451,7 +461,6 @@ class ScrapImg:
                 break
             pass
 
-
     def parse_single_page_data(self, page_url):
         http_headers = {'User-Agent': 'Mozilla/5.0 (X11; Linux i686; rv:8.0) Gecko/20100101 Firefox/8.0',
                         'Referer': 'http://hkpic-forum.xyz/forum.php?gid=1',
@@ -488,13 +497,13 @@ class ScrapImg:
 
     def get_imgurls_from_data(self, data):
         # http://img.bipics.net/data/attachment/forum/201610/14/101421bvx3f83jvq4xyyo3.jpg"
-        img_names = re.findall('http://img.bipics.net/data/attachment/forum/(?P<time>\d{4,6}/\d{1,2}/)(?P<img_name>.*?)"', data)
+        img_names = re.findall('zoomfile="data/attachment/forum/(?P<time>\d{4,6}/\d{1,2}/)(?P<img_name>.*?)"', data)
         count = 0
         ret = list()
         for img_name in img_names:
             (folde, name) = img_name
             if 'thumb' not in name:
-                ret.append('http://img.bipics.net/data/attachment/forum/' + folde + name)
+                ret.append('http://hk-pic2.xyz/data/attachment/forum/' + folde + name)
                 count += 1
         print 'imgurl total count : %d' % count
         return ret
@@ -502,6 +511,8 @@ class ScrapImg:
 
     def get_img_tail(self, url):
         m = re.search('.\w{3,4}$', url)
+        if not m:
+            return 'jpg'
         return m.group(0)
         pass
 
@@ -556,11 +567,14 @@ class ScrapImg:
                     else:
                         try_count += 1
                         print 'try again to download %s' % url
+                except KeyboardInterrupt:
+                    exit(0)
                 except:
                     e = sys.exc_info()[0]
                     print 'ERROR:download img fail %s' % str(e)
                     debug_info(0, e)
                     raise MyUrlOpenErr('ERROR:download img fail %s' % str(e))
+
         return ret
         pass
 
@@ -792,6 +806,46 @@ class ScrapImg:
         for i in range(self.max_thread):
             task_queue.put('quit')
 
+    def get_valid_file_name_from_str(self, str_name):
+        ret_str = ''
+        for c in str_name:
+            if 'A' <= c <= 'z':
+                ret_str += c
+        return ret_str
+
+    def parse_one_page(self, page_url, folder_path):
+        self.set_store_folder(folder_path)
+        self.log('Set Store Folder to [%s]' % folder_path)
+        try:
+            data = self.parse_single_page_data(page_url)
+        except MyUrlOpenErr:
+            return
+        pattern = '/(?P<PageId>thread-\d+-\d+)'
+        m = re.search(pattern=pattern, string=page_url)
+        if m:
+            img_store_name_head = m.group('PageId')
+        else:
+            img_store_name_head = self.get_valid_file_name_from_str(page_url)
+        with open('one_page_page_data.html', 'w+') as fd:
+            fd.write(data)
+        if data:
+            img_urls = self.get_imgurls_from_data(data)
+            self.log('[%d] Imgs Found' % len(img_urls))
+            for img_url in img_urls:
+                img_name = img_url.split('/')[-1]
+                file_name = img_store_name_head + '-' + img_name
+                try:
+                    self.log(img_url, silent=True)
+                    self.log(file_name, silent=True)
+                    ret = self.download_img(urls=img_url, img_name=file_name)
+                except MyUrlOpenErr:
+                    self.log('Failed download Img [%s]' % img_url)
+                    continue
+                except KeyboardInterrupt:
+                    exit(0)
+        else:
+            self.log('None Data from page [%s]' % page_url)
+
     def start_parse(self):
         p = multiprocessing.Process(target=self.start_pages_parse_task )
         p.start()
@@ -820,13 +874,38 @@ def debug_info(level, information):
     pass
 
 
+def init_arg_parser():
+    arg_parse = MyArgParse()
+    arg_parse.add_option('-login', 0, 'just test login')
+    arg_parse.add_option('-getpage', [1], 'specific page Imgs')
+    arg_parse.add_option('-d', 1, 'set Folder to store')
+    arg_parse.add_option('-h', 0, 'print help')
+    return arg_parse
+    pass
+
+
 if __name__ == '__main__':
+    arg_parser = init_arg_parser()
+    arg_parser.parse(sys.argv)
+    if arg_parser.check_option('-h'):
+        print arg_parser
+        exit(0)
+
     hk_login = LoginMethod()
     hk_login.get_config()
     hk_login.do_login()
+    if arg_parser.check_option('-login'):
+        exit(0)
+    if arg_parser.check_option('-getpage'):
+        store_folder = 'Imgs'
+        if arg_parser.check_option('-d'):
+           store_folder = arg_parser.get_option_args('-d')[0]
+        page_url = arg_parser.get_option_args('-getpage')[0]
+        scrap = ScrapImg()
+        scrap.parse_one_page(page_url, store_folder)
 
-    scrap = ScrapImg()
-    scrap.start_parse()
+    # scrap = ScrapImg()
+    # scrap.start_parse()
     #page_records = scrap.get_pages_to_process(20)
     #print page_records
     #scrap.download_img('http://img.bipics.net/data/attachment/forum/201612/09/202911u9dil762u67h0u69.png.thumb.jpg')
